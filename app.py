@@ -6,7 +6,7 @@ import plotly.graph_objs as go
 import numpy as np
 import pandas as pd
 import datetime as dt
-
+import os # Importar os para manejo de variables de entorno, aunque no se usa directamente en esta función, es buena práctica si se usa en otro lado.
 
 
 app = dash.Dash(
@@ -21,16 +21,52 @@ app.config.suppress_callback_exceptions = True
 
 # Load data from csv
 def load_data():
-    # To do: Completar la función 
-    
+    """
+    Carga el archivo datos_energia.csv, convierte la columna de fecha a datetime
+    y establece la fecha como índice del DataFrame.
+    """
+    try:
+        # Cargar el archivo CSV
+        # Asegúrate de que 'datos_energia.csv' esté en el mismo directorio que app.py
+        df = pd.read_csv('datos_energia.csv')
 
-# Cargar datos
+        # Convertir la columna de fecha a formato datetime
+        # Se ha corregido el nombre de la columna a 'time' según tu CSV.
+        df['time'] = pd.to_datetime(df['time'])
+
+        # Establecer la columna de fecha como índice del DataFrame
+        # Se ha corregido el nombre de la columna a 'time'
+        df.set_index('time', inplace=True)
+
+        # Retornar el DataFrame cargado y procesado
+        return df
+    except FileNotFoundError:
+        print("Error: El archivo 'datos_energia.csv' no se encontró. Asegúrate de que esté en el mismo directorio que app.py.")
+        return pd.DataFrame() # Retorna un DataFrame vacío en caso de error
+    except KeyError:
+        # Este error ahora debería ser menos probable si la columna se llama 'time'
+        print("Error: La columna de tiempo ('time') no se encontró en 'datos_energia.csv'. Por favor, verifica el nombre de la columna de fecha/hora.")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Ocurrió un error inesperado al cargar los datos: {e}")
+        return pd.DataFrame()
+
+# Cargar datos al inicio de la aplicación
 data = load_data()
 
 # Graficar serie
 def plot_series(data, initial_date, proy):
+    # Asegurarse de que 'data' no esté vacío
+    if data.empty:
+        return go.Figure().add_annotation(text="No hay datos para mostrar. Verifica 'datos_energia.csv'.",
+                                          xref="paper", yref="paper", showarrow=False,
+                                          font=dict(size=16, color="red"))
+
     data_plot = data.loc[initial_date:]
-    data_plot = data_plot[:-(120-proy)]
+    # Asegurarse de que la rebanada no sea mayor que el DataFrame
+    end_index = min(len(data_plot), len(data_plot) - (120 - proy))
+    data_plot = data_plot[:end_index]
+
     fig = go.Figure([
         go.Scatter(
             name='Demanda energética',
@@ -77,17 +113,13 @@ def plot_series(data, initial_date, proy):
             x=1
         ),
         yaxis_title='Demanda total [MW]',
-        #title='Continuous, variable value error bars',
         hovermode="x"
     )
-    #fig = px.line(data2, x='local_timestamp', y="Demanda total [MW]", markers=True, labels={"local_timestamp": "Fecha"})
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="#2cfec1")
     fig.update_xaxes(showgrid=True, gridwidth=0.25, gridcolor='#7C7C7C')
     fig.update_yaxes(showgrid=True, gridwidth=0.25, gridcolor='#7C7C7C')
-    #fig.update_traces(line_color='#2cfec1')
 
     return fig
-
 
 
 def description_card():
@@ -97,7 +129,6 @@ def description_card():
     return html.Div(
         id="description-card",
         children=[
-            #html.H5("Proyecto 1"),
             html.H3("Pronóstico de producción energética"),
             html.Div(
                 id="intro",
@@ -111,6 +142,13 @@ def generate_control_card():
     """
     :return: A Div containing controls for graphs.
     """
+    # Asegurarse de que 'data' no esté vacío antes de acceder a sus propiedades
+    min_date = min(data.index.date) if not data.empty else dt.date.today()
+    max_date = max(data.index.date) if not data.empty else dt.date.today()
+    initial_date_picker = max(data.index.date) - dt.timedelta(days=7) if not data.empty else dt.date.today()
+    initial_hour_dropdown = pd.to_datetime(max(data.index)-dt.timedelta(days=7)).hour if not data.empty else 0
+
+
     return html.Div(
         id="control-card",
         children=[
@@ -126,10 +164,10 @@ def generate_control_card():
                         children=[
                             dcc.DatePickerSingle(
                                 id='datepicker-inicial',
-                                min_date_allowed=min(data.index.date),
-                                max_date_allowed=max(data.index.date),
-                                initial_visible_month=min(data.index.date),
-                                date=max(data.index.date)-dt.timedelta(days=7)
+                                min_date_allowed=min_date,
+                                max_date_allowed=max_date,
+                                initial_visible_month=min_date,
+                                date=initial_date_picker
                             )
                         ],
                         style=dict(width='30%')
@@ -143,7 +181,7 @@ def generate_control_card():
                             dcc.Dropdown(
                                 id="dropdown-hora-inicial-hora",
                                 options=[{"label": i, "value": i} for i in np.arange(0,25)],
-                                value=pd.to_datetime(max(data.index)-dt.timedelta(days=7)).hour,
+                                value=initial_hour_dropdown,
                                 # style=dict(width='50%', display="inline-block")
                             )
                         ],
@@ -226,6 +264,12 @@ app.layout = html.Div(
 )
 def update_output_div(date, hour, proy):
 
+    # Asegurarse de que 'data' no esté vacío antes de procesar
+    if data.empty:
+        return go.Figure().add_annotation(text="No hay datos cargados para generar el gráfico.",
+                                          xref="paper", yref="paper", showarrow=False,
+                                          font=dict(size=16, color="red"))
+
     if ((date is not None) & (hour is not None) & (proy is not None)):
         hour = str(hour)
         minute = str(0)
@@ -236,8 +280,9 @@ def update_output_div(date, hour, proy):
         # Graficar
         plot = plot_series(data, initial_date, int(proy))
         return plot
+    return go.Figure() # Retornar una figura vacía si las entradas no son válidas
 
 
 # Run the server
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True) # Se ha cambiado app.run_server a app.run
