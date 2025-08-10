@@ -286,3 +286,4 @@ def update_output_div(date, hour, proy):
 # Run the server
 if __name__ == "__main__":
     app.run(debug=True) # Se ha cambiado app.run_server a app.run
+# Modificacion de prueba
